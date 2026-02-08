@@ -9,7 +9,7 @@ const client = new Client({
   ]
 });
 
-// ---------- BOT READY ----------
+// ================= READY =================
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
@@ -18,7 +18,8 @@ client.once('ready', async () => {
       .setName('ask')
       .setDescription('Ask BloodEclipse-AI anything')
       .addStringOption(option =>
-        option.setName('question')
+        option
+          .setName('question')
           .setDescription('Your question')
           .setRequired(true)
       )
@@ -27,17 +28,28 @@ client.once('ready', async () => {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
   try {
-    await rest.put(
-      Routes.applicationCommands(process.env.CLIENT_ID),
-      { body: commands }
-    );
-    console.log('Slash command registered.');
+    if (process.env.GUILD_ID) {
+      await rest.put(
+        Routes.applicationGuildCommands(
+          process.env.CLIENT_ID,
+          process.env.GUILD_ID
+        ),
+        { body: commands }
+      );
+      console.log("Slash commands registered to guild.");
+    } else {
+      await rest.put(
+        Routes.applicationCommands(process.env.CLIENT_ID),
+        { body: commands }
+      );
+      console.log("Global slash commands registered.");
+    }
   } catch (error) {
     console.error(error);
   }
 });
 
-// ---------- OPENROUTER CALL ----------
+// ================= AI CALL =================
 async function askAI(prompt) {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -64,7 +76,7 @@ async function askAI(prompt) {
   return data.choices[0].message.content;
 }
 
-// ---------- SLASH COMMAND ----------
+// ================= INTERACTIONS =================
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -78,10 +90,10 @@ client.on('interactionCreate', async interaction => {
       await interaction.editReply(answer);
     } catch (err) {
       console.error(err);
-      await interaction.editReply("⚠️ BloodEclipse-AI crashed. Try again.");
+      await interaction.editReply("⚠️ BloodEclipse-AI had a hiccup. Try again.");
     }
   }
 });
 
-// ---------- LOGIN ----------
+// ================= LOGIN =================
 client.login(process.env.DISCORD_TOKEN);
