@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import fetch from 'node-fetch';
+import cheerio from 'cheerio';
 
 const client = new Client({
   intents: [
@@ -30,10 +32,7 @@ client.once('ready', async () => {
   try {
     if (process.env.GUILD_ID) {
       await rest.put(
-        Routes.applicationGuildCommands(
-          process.env.CLIENT_ID,
-          process.env.GUILD_ID
-        ),
+        Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
         { body: commands }
       );
       console.log("Slash commands registered to guild.");
@@ -49,8 +48,53 @@ client.once('ready', async () => {
   }
 });
 
+// ================= WEB SEARCH =================
+async function webSearch(query) {
+  const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}+where+winds+meet+site:reddit.com+OR+site:steamcommunity.com`;
+  
+  const res = await fetch(searchUrl);
+  const html = await res.text();
+  const $ = cheerio.load(html);
+  
+  const results = [];
+  $('a.result__a').each((i, el) => {
+    if (i >= 5) return false; // top 5 results only
+    results.push($(el).attr('href'));
+  });
+  
+  return results;
+}
+
+// ================= SCRAPE PAGE =================
+async function scrapePage(url) {
+  try {
+    const res = await fetch(url);
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    let text = $('body').text();
+    text = text.replace(/\s+/g, ' ').trim();
+    return text.slice(0, 2000); // limit for AI
+  } catch (err) {
+    console.error("Scrape error:", err);
+    return '';
+  }
+}
+
 // ================= AI CALL =================
 async function askAI(prompt) {
+  // Step 1: search & scrape
+  const urls = await webSearch(prompt);
+  const contextTexts = [];
+  
+  for (const url of urls) {
+    const pageText = await scrapePage(url);
+    if (pageText) contextTexts.push(pageText);
+  }
+
+  const context = contextTexts.join("\n\n");
+
+  // Step 2: AI summary
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -66,7 +110,7 @@ async function askAI(prompt) {
         },
         {
           role: "user",
-          content: prompt
+          content: `User asked: ${prompt}\n\nUse the following web info to answer accurately:\n${context}`
         }
       ]
     })
@@ -89,8 +133,8 @@ client.on('interactionCreate', async interaction => {
       const answer = await askAI(question);
       await interaction.editReply(answer);
     } catch (err) {
-      console.error(err);
-      await interaction.editReply("⚠️ BloodEclipse-AI had a hiccup. Try again.");
+      console.error("OPENROUTER ERROR:", err);
+      await interaction.editReply("⚠️ BloodEclipse-AI could not reach OpenRouter. Check API key and model.");
     }
   }
 });
