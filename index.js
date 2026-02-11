@@ -1,8 +1,7 @@
-// BloodEclipse-AI with TEXT TO IMAGE
+// BloodEclipse-AI with Text-to-Image and Guild Slash Commands
 
 import 'dotenv/config';
 import { Client, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder } from "discord.js";
-import fetch from "node-fetch";
 import axios from "axios";
 
 // =====================
@@ -32,27 +31,36 @@ const client = new Client({
 const commands = [
   new SlashCommandBuilder()
     .setName("imagine")
-    .setDescription("Generate AI Image")
+    .setDescription("Generate AI-created image")
     .addStringOption(option =>
-      option.setName("prompt")
-        .setDescription("Describe your image")
+      option
+        .setName("prompt")
+        .setDescription("Describe what you want the AI to draw")
         .setRequired(true)
     )
 ].map(cmd => cmd.toJSON());
 
-const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
+// =====================
+// REGISTER COMMANDS
+// =====================
 
-// =====================
-// REGISTER COMMAND
-// =====================
+const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
+const GUILD_ID = "1464753552915435848"; // your server ID
 
 async function registerCommands() {
-  const appId = (await rest.get(Routes.oauth2CurrentApplication())).id;
-  await rest.put(
-    Routes.applicationCommands(appId),
-    { body: commands }
-  );
-  console.log("✅ Slash command registered");
+  try {
+    const appData = await rest.get(Routes.oauth2CurrentApplication());
+    const appId = appData.id;
+
+    await rest.put(
+      Routes.applicationGuildCommands(appId, GUILD_ID),
+      { body: commands }
+    );
+
+    console.log("✅ Slash commands registered to your guild!");
+  } catch (err) {
+    console.error("❌ Error registering slash commands:", err);
+  }
 }
 
 // =====================
@@ -60,59 +68,71 @@ async function registerCommands() {
 // =====================
 
 async function generateImage(prompt) {
-  const response = await axios.post(
-    "https://modelslab.com/api/v6/images/text2img",
-    {
-      key: MODELSLAB_API_KEY,
-      prompt: prompt,
-      width: 512,
-      height: 512,
-      samples: 1,
-      num_inference_steps: 25
-    }
-  );
+  try {
+    const response = await axios.post(
+      "https://modelslab.com/api/v6/images/text2img",
+      {
+        key: MODELSLAB_API_KEY,
+        prompt: prompt,
+        // Adjust width/height if you want square/other dimensions
+        width: 512,
+        height: 512,
+        samples: 1,
+        num_inference_steps: 25
+      }
+    );
 
-  return response.data.output[0];
+    if (!response.data || !response.data.output || !response.data.output[0]) {
+      throw new Error("No image URL in Modelslab response");
+    }
+
+    return response.data.output[0];
+  } catch (err) {
+    console.error("Image generation error:", err);
+    throw err;
+  }
 }
 
 // =====================
-// INTERACTIONS
+// INTERACTION EVENT
 // =====================
 
 client.on("interactionCreate", async (interaction) => {
-
   if (!interaction.isChatInputCommand()) return;
 
-  if (interaction.commandName === "imagine") {
+  const { commandName } = interaction;
 
+  if (commandName === "imagine") {
     const prompt = interaction.options.getString("prompt");
 
-    await interaction.reply("🎨 Cooking your image...");
-
     try {
+      await interaction.deferReply(); // show “thinking…”
+
       const imageUrl = await generateImage(prompt);
 
       await interaction.editReply({
-        content: `🔥 **Prompt:** ${prompt}`,
+        content: `🎨 **Prompt:** ${prompt}`,
         files: [imageUrl]
       });
 
-    } catch (err) {
-      console.error(err);
-      await interaction.editReply("❌ Image generation failed.");
+    } catch (error) {
+      console.error("Reply error:", error);
+      await interaction.editReply("❌ Failed to generate image. Try a simpler prompt or try again later.");
     }
   }
-
 });
 
 // =====================
 // READY
 // =====================
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`🔥 Logged in as ${client.user.tag}`);
   client.user.setActivity("Creating Art 🎨", { type: ActivityType.Playing });
   await registerCommands();
 });
+
+// Note: discord.js v14 emits 'clientReady' instead of 'ready' for slash compatibility
+client.on("clientReady", () => {}); // to avoid missing handler
 
 client.login(DISCORD_TOKEN);
