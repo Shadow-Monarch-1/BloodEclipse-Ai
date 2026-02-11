@@ -1,143 +1,118 @@
-// BloodEclipse-AI — Stable Version (NO CHEERIO, NO SCRAPING)
-
-console.log("DISCORD_TOKEN:", process.env.DISCORD_TOKEN ? "FOUND" : "MISSING");
-console.log("OPENROUTER_API_KEY:", process.env.OPENROUTER_API_KEY ? "FOUND" : "MISSING");
+// BloodEclipse-AI with TEXT TO IMAGE
 
 import 'dotenv/config';
-import { Client, GatewayIntentBits, Partials, ActivityType } from 'discord.js';
-import fetch from 'node-fetch';
+import { Client, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder } from "discord.js";
+import fetch from "node-fetch";
+import axios from "axios";
+
+// =====================
+// ENV
+// =====================
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const MODEL = "gpt-4o-mini"; // fast & cheap
+const MODELSLAB_API_KEY = process.env.MODELSLAB_API_KEY;
 
-if (!DISCORD_TOKEN) {
-  console.error("Missing DISCORD_TOKEN");
-  process.exit(1);
-}
+if (!DISCORD_TOKEN) throw new Error("Missing DISCORD_TOKEN");
+if (!OPENROUTER_API_KEY) throw new Error("Missing OPENROUTER_API_KEY");
+if (!MODELSLAB_API_KEY) throw new Error("Missing MODELSLAB_API_KEY");
 
-if (!OPENROUTER_API_KEY) {
-  console.error("Missing OPENROUTER_API_KEY");
-  process.exit(1);
-}
-
-// --------------------
-// Discord Client
-// --------------------
+// =====================
+// CLIENT
+// =====================
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ],
-  partials: [Partials.Channel]
+  intents: [GatewayIntentBits.Guilds]
 });
 
-// --------------------
-// Persona Prompt
-// --------------------
+// =====================
+// SLASH COMMANDS
+// =====================
 
-const SYSTEM_PROMPT = `
-You are BloodEclipse-AI, the official Discord bot for the BloodEclipse guild in the MMORPG "Where Winds Meet".
+const commands = [
+  new SlashCommandBuilder()
+    .setName("imagine")
+    .setDescription("Generate AI Image")
+    .addStringOption(option =>
+      option.setName("prompt")
+        .setDescription("Describe your image")
+        .setRequired(true)
+    )
+].map(cmd => cmd.toJSON());
 
-Style:
-- Gen-Z gamer slang
-- Emojis
-- Friendly, concise
-- If unsure, admit it casually
-- Keep answers under 200 words
-`;
+const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
 
-// --------------------
-// DuckDuckGo Instant Answer API
-// --------------------
+// =====================
+// REGISTER COMMAND
+// =====================
 
-async function webSearch(query) {
-  try {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
-    const res = await fetch(url);
-    const data = await res.json();
-
-    if (data.AbstractText) return data.AbstractText;
-    if (data.Answer) return data.Answer;
-
-    return "No direct info found.";
-  } catch (err) {
-    console.error("Search error:", err);
-    return "Search unavailable.";
-  }
+async function registerCommands() {
+  const appId = (await rest.get(Routes.oauth2CurrentApplication())).id;
+  await rest.put(
+    Routes.applicationCommands(appId),
+    { body: commands }
+  );
+  console.log("✅ Slash command registered");
 }
 
-// --------------------
-// OpenRouter AI Call
-// --------------------
+// =====================
+// IMAGE GENERATION
+// =====================
 
-async function askAI(prompt) {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: prompt }
-      ]
-    })
-  });
+async function generateImage(prompt) {
+  const response = await axios.post(
+    "https://modelslab.com/api/v6/images/text2img",
+    {
+      key: MODELSLAB_API_KEY,
+      prompt: prompt,
+      width: 512,
+      height: 512,
+      samples: 1,
+      num_inference_steps: 25
+    }
+  );
 
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || "AI brain fart 🤯";
+  return response.data.output[0];
 }
 
-// --------------------
-// Message Handler
-// --------------------
+// =====================
+// INTERACTIONS
+// =====================
 
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (!message.content.startsWith("!ai ")) return;
+client.on("interactionCreate", async (interaction) => {
 
-  const query = message.content.slice(4).trim();
-  if (!query) return message.reply("Ask something fam 👀");
+  if (!interaction.isChatInputCommand()) return;
 
-  await message.channel.sendTyping();
+  if (interaction.commandName === "imagine") {
 
-  try {
-    const searchInfo = await webSearch(query);
+    const prompt = interaction.options.getString("prompt");
 
-    const aiReply = await askAI(`
-User question: ${query}
+    await interaction.reply("🎨 Cooking your image...");
 
-Web info:
-${searchInfo}
+    try {
+      const imageUrl = await generateImage(prompt);
 
-Answer naturally:
-`);
+      await interaction.editReply({
+        content: `🔥 **Prompt:** ${prompt}`,
+        files: [imageUrl]
+      });
 
-    message.reply(aiReply.slice(0, 2000));
-  } catch (err) {
-    console.error(err);
-    message.reply("System crashed 💀 Try again.");
+    } catch (err) {
+      console.error(err);
+      await interaction.editReply("❌ Image generation failed.");
+    }
   }
+
 });
 
-// --------------------
-// Ready Event
-// --------------------
+// =====================
+// READY
+// =====================
 
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log(`🔥 Logged in as ${client.user.tag}`);
-  client.user.setActivity("WWM Guides | !ai", {
-    type: ActivityType.Watching
-  });
+  client.user.setActivity("Creating Art 🎨", { type: ActivityType.Playing });
+  await registerCommands();
 });
-
-// --------------------
-// Login
-// --------------------
 
 client.login(DISCORD_TOKEN);
