@@ -8,10 +8,9 @@ export async function askOpenRouter(prompt) {
         model: "gpt-4o-mini",
         messages: [
           { role: "system", content: `
-You are BloodEclipse‑AI: savage gamer personality:
-• Friendly but roasty
-• Use emojis
-• Concise answers
+You are BloodEclipse-AI: savage gamer energy.
+• Friendly but roast if needed
+• Concise with emojis
 ` },
           { role: "user", content: prompt }
         ]
@@ -19,14 +18,14 @@ You are BloodEclipse‑AI: savage gamer personality:
       {
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`
         }
       }
     );
 
     return res.data.choices[0].message.content;
   } catch (err) {
-    console.error("OpenRouter error:", err);
-    return "AI failed to respond.";
+    console.error("OpenRouter request failed:", err);
+    return "🤖 AI failed to respond.";
   }
 }
