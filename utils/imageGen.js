@@ -12,10 +12,9 @@ export async function generateImage(prompt) {
         samples: 1
       }
     );
-
     return res.data.output[0];
   } catch (err) {
-    console.error("ImageGen error:", err);
+    console.error("Image generation API error:", err);
     throw err;
   }
 }
